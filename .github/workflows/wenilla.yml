@@ -1,0 +1,198 @@
+# wenilla: download the game client data (cached), build the wasm client, run the host tests,
+# drive the client in headless Chromium for screenshots, and (opt-in) deploy the client shell to
+# GitHub Pages.
+#
+# HARD RULES encoded here:
+#  - No Blizzard file is ever committed or uploaded as an artifact/Pages file. The WoW 1.12.1
+#    MPQs (~5.5 GB zip from archive.org) live only on the runner disk and in the Actions cache.
+#  - Pages is unlisted (noindex meta + robots.txt, see scripts/ci/assemble-site.sh) and its URL is
+#    not linked anywhere in this repo.
+#  - The deploy job runs only when the repository variable PAGES_ENABLED is non-empty. Everything
+#    else (download, build, tests, screenshot) runs regardless.
+#  - NOTE/TODO: serving game data from Pages would redistribute Blizzard assets; it is NOT done.
+#    The Pages site is the client shell only and cannot load the world on its own.
+#
+# Repository variables (Settings > Secrets and variables > Actions > Variables):
+#   PAGES_ENABLED  any non-empty value enables the deploy job (also set Pages source to "GitHub
+#                  Actions"). WOW_DATA_URLS  whitespace/newline separated mirror URLs for the zip.
+name: wenilla
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+concurrency:
+  group: wenilla-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+env:
+  CARGO_TERM_COLOR: always
+  # Same key everywhere. Bump the -vN suffix to invalidate. NB: the cache scope rules mean a cache
+  # created on a PR branch is not visible to main; run the workflow on main once to seed it.
+  DATA_CACHE_KEY: wow-data-1.12.1-5875-v1
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      WOW_DATA_URLS: ${{ vars.WOW_DATA_URLS }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- a. game data (cached) -------------------------------------------------------------
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean || true
+          df -h /
+
+      - name: Restore game data cache
+        id: data-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: wow-data/Data
+          key: ${{ env.DATA_CACHE_KEY }}
+
+      - name: Fetch game data (cache miss only)
+        id: fetch
+        if: steps.data-cache.outputs.cache-hit != 'true'
+        run: scripts/fetch-data.sh
+
+      # Saved right after a successful fetch so a later build failure cannot lose the 5 GB.
+      - name: Save game data cache
+        if: steps.data-cache.outputs.cache-hit != 'true' && steps.fetch.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: wow-data/Data
+          key: ${{ env.DATA_CACHE_KEY }}
+
+      - name: Game data sizes (and cache-limit check)
+        run: |
+          ls -l wow-data/Data/*.MPQ
+          bytes=$(du -sb wow-data/Data | cut -f1)
+          echo "wow-data/Data: $bytes bytes ($(du -sh wow-data/Data | cut -f1)); cache hit: ${{ steps.data-cache.outputs.cache-hit }}"
+          if [ "$bytes" -gt 9000000000 ]; then
+            echo "::warning title=Actions cache near limit::wow-data/Data is $bytes bytes; the repo-wide cache limit is 10 GB (rust-cache and others share it)"
+          fi
+
+      # --- b. build --------------------------------------------------------------------------
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wenilla
+          cache-directories: tools
+      - name: brotli (precompressed .br siblings)
+        run: sudo apt-get update && sudo apt-get install -y brotli
+      - name: Toolchain (scripts/web-setup.sh)
+        run: scripts/web-setup.sh
+      - name: Build wasm client (scripts/web-build.sh)
+        run: scripts/web-build.sh
+      - name: Build output sizes (Pages-fit evidence)
+        run: |
+          {
+            echo '### web/dist sizes'
+            echo 'Pages limits: 100 MB per file, ~1 GB per site, 10 GB/month soft bandwidth.'
+            echo '```'
+            ls -l web/dist
+            du -b web/dist/*.wasm web/dist/*.wasm.br web/dist/*.wasm.gz web/dist/*.js.br 2>/dev/null || true
+            echo "total: $(du -sb web/dist | cut -f1) bytes"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The site/ payload is client-only (no game data). Uploaded as an artifact even when the
+      # deploy job is skipped, so its size can always be checked.
+      - name: Assemble site/ (client only, noindex)
+        run: scripts/ci/assemble-site.sh web/dist site
+      - name: Upload site artifact (inspection)
+        uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: site
+          retention-days: 14
+      # Pages artifact for the deploy job (separate from the plain `site` artifact above).
+      - name: Upload Pages artifact
+        if: vars.PAGES_ENABLED != '' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      # --- tests that use the real data ------------------------------------------------------
+      - name: Browser startup and journal tests
+        run: node --test web/tests/*.test.mjs
+      - name: wenilla-host tests (with real MPQs)
+        env:
+          WOW_DATA: ${{ github.workspace }}/wow-data/Data
+        run: cargo test --release -p wenilla-host
+
+      # --- c. serve and measure --------------------------------------------------------------
+      # Survivors mode needs no realm: crates/wenilla's start() calls benilla_app::run_survivors,
+      # and wenilla-host only dials its --upstream (default 127.0.0.1) lazily when the page opens
+      # /ws/{3724,8085}, which the survivors client never does. So no mangos server is started.
+      - name: Start wenilla-host
+        run: |
+          mkdir -p ci-out
+          nohup cargo run --release -p wenilla-host -- --www web/dist --data wow-data/Data > ci-out/host.log 2>&1 &
+          for i in $(seq 1 120); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8090/; then echo "host up after ${i}s"; exit 0; fi
+            sleep 1
+          done
+          echo "host did not come up"; cat ci-out/host.log; exit 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Playwright (scratch dir outside the repo)
+        run: |
+          PW_DIR="$RUNNER_TEMP/pw"
+          mkdir -p "$PW_DIR" && cd "$PW_DIR"
+          npm init -y >/dev/null
+          npm i playwright@1.49.1
+          npx playwright install --with-deps chromium
+          echo "PW_DIR=$PW_DIR" >> "$GITHUB_ENV"
+
+      - name: Drive the client and take screenshots
+        id: shoot
+        continue-on-error: true
+        timeout-minutes: 45
+        run: node scripts/ci/shoot.mjs ci-out
+
+      - name: Result summary
+        if: always()
+        run: |
+          if [ -f ci-out/RESULT.md ]; then
+            cat ci-out/RESULT.md | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            printf '# wenilla CI screenshot run: FAIL\n\n- reason: shoot.mjs produced no RESULT.md (step outcome: %s)\n' "${{ steps.shoot.outcome }}" | tee ci-out/RESULT.md | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          # Game data is never uploaded: ci-out holds only logs, json and PNG screenshots.
+          find ci-out -type f -printf '%s %p\n'
+
+      - name: Upload ci-out
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-out
+          path: ci-out
+          retention-days: 14
+          if-no-files-found: warn
+
+  # --- d. Pages deploy (opt-in) ------------------------------------------------------------
+  # Runs only when the repo variable PAGES_ENABLED is non-empty. Ships site/ = client shell only;
+  # NO game data (redistributing Blizzard assets is not done), so the world cannot load there.
+  deploy-pages:
+    needs: build-and-test
+    if: vars.PAGES_ENABLED != '' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+    steps:
+      - uses: actions/configure-pages@v5
+      - id: deployment
+        uses: actions/deploy-pages@v4
