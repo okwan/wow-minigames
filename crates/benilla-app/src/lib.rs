@@ -108,8 +108,6 @@ mod sound;
 /// The two talent spell-modifier tables (`SMSG_SET_FLAT_/PCT_SPELL_MODIFIER`) and the read that
 /// puts them on a number.
 mod spell;
-/// Warcraft Survivors: the top-down survival mode the `warcraft-survivors` launcher boots.
-mod survivors;
 /// The melee swing refusal's latch + 4 s repeat (`SMSG_ATTACKSWING_*`).
 mod swing_refusal;
 mod target;
@@ -233,13 +231,6 @@ pub fn run_with(build: BuildId, extend: impl FnOnce(&mut App)) -> AppExit {
     launch(build, Some(Box::new(extend)))
 }
 
-/// Warcraft Survivors: the client booted server-less into a top-down survival mode on a picked
-/// battleground ([`survivors`]), called by the `warcraft-survivors` launcher.
-pub fn run_survivors(build: BuildId) -> AppExit {
-    survivors::ACTIVE.store(true, std::sync::atomic::Ordering::Relaxed);
-    launch(build, None)
-}
-
 /// The sandbox: the client booted server-less into the real world with one local character,
 /// driven by the engine's own player controller and camera, and no game on top ([`sandbox`]).
 /// Called by the `sandbox` launcher and by `wenilla`'s browser entry.
@@ -324,13 +315,9 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
     // With `$WOW_CAPTURE` set the app runs a deterministic, server-less capture (net off, so no
     // NPCs stream in) and exits.
     let capturing = run_mode::scenario_active();
-    // Survivors runs server-less too, on Kalimdor; `world_map` reads the map at `Startup`.
-    let survivors = survivors::active();
-    if survivors {
-        benilla_world::world_map::set_start_map(1);
-    }
-    // The sandbox is server-less too, on the map its parameters name.
-    let sandbox = (sandbox::active() && !survivors).then(sandbox::SandboxParams::from_env);
+    // The sandbox runs server-less too, on the map its parameters name; `world_map` reads the map
+    // at `Startup`.
+    let sandbox = sandbox::active().then(sandbox::SandboxParams::from_env);
     if let Some(params) = &sandbox {
         benilla_world::world_map::set_start_map(params.map);
     }
@@ -369,9 +356,7 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
     // (`embedded://benilla_app/shaders/…`), so no build-machine path reaches the binary.
 
     app.add_plugins(benilla_world::boot::tuned_default_plugins(Window {
-        title: if survivors {
-            "Warcraft Survivors"
-        } else if sandbox.is_some() {
+        title: if sandbox.is_some() {
             "WoW Sandbox"
         } else {
             "benilla"
@@ -463,16 +448,13 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
     // The game as one group on top of the engine; `game_plugins.rs` has its members, its
     // load-bearing ordering edges and the test that builds it headless.
     .add_plugins(game_plugins::GamePlugins {
-        connect: !capturing && !survivors && sandbox.is_none(),
-        start: if survivors || sandbox.is_some() {
+        connect: !capturing && sandbox.is_none(),
+        start: if sandbox.is_some() {
             char_select::ClientState::InWorld
         } else {
             run_mode::start_state()
         },
     });
-    if survivors {
-        app.add_plugins(survivors::SurvivorsPlugin);
-    }
     if let Some(params) = sandbox {
         app.add_plugins(sandbox::SandboxPlugin::new(params));
     }
