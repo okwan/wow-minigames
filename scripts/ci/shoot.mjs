@@ -25,6 +25,7 @@ const URL_ = `${BASE}/?survivors_auto=${encodeURIComponent(CLASS)}&survivors_map
 const GB = 1000 ** 3, MB = 1000 ** 2;
 
 fs.mkdirSync(OUT, { recursive: true });
+const withTimeout = (p, ms, what) => Promise.race([p, new Promise((_, rj) => setTimeout(() => rj(new Error(`${what} hung > ${ms / 1000}s`)), ms))]);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const t0 = Date.now();
 const since = () => ((Date.now() - t0) / 1000).toFixed(1);
@@ -102,7 +103,9 @@ function dataSummary() {
   };
 }
 function writeLedger() {
-  fs.writeFileSync(path.join(OUT, 'data-requests.json'), JSON.stringify(dataSummary(), null, 2));
+  const ds = dataSummary();
+  fs.writeFileSync(path.join(OUT, 'data-requests.json'), JSON.stringify(ds, null, 2));
+  fs.writeFileSync(path.join(OUT, 'data-names.txt'), ds.names.join('\n') + (ds.names.length ? '\n' : ''));
   fs.writeFileSync(path.join(OUT, 'console.log'), consoleLines.join('\n') + `\n(suppressed ${suppressed} 404/failed-resource lines)\n`);
 }
 
@@ -130,6 +133,7 @@ async function frameStats(helper, png) {
 const looksRendered = (s) => s.lit_fraction > 0.05 && s.colours >= 12;
 
 // ---- main ----------------------------------------------------------------------------------
+let finished = false;
 const result = { status: 'FAIL', reason: 'did not start', flagSet: null, shots: [], rendered: false, runBegan: false };
 
 async function main() {
@@ -215,27 +219,27 @@ async function main() {
     const grab = async () => {
       await page.bringToFront().catch(() => {});
       const cands = [];
-      try { cands.push({ mode: 'page.screenshot', png: await page.screenshot({ type: 'png', timeout: 60000 }) }); } catch (e) { note(`page.screenshot failed: ${e.message.split('\n')[0]}`); }
+      try { cands.push({ mode: 'page.screenshot', png: await withTimeout(page.screenshot({ type: 'png', timeout: 25000 }), 25000, 'page.screenshot') }); } catch (e) { note(`page.screenshot failed: ${e.message.split('\n')[0]}`); }
       if (cdp) {
         try {
-          const r = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true });
+          const r = await withTimeout(cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true }), 25000, 'cdp capture');
           cands.push({ mode: 'cdp.fromSurface', png: Buffer.from(r.data, 'base64') });
         } catch (e) { note(`cdp capture failed: ${e.message.split('\n')[0]}`); }
       }
       try {
-        const d = await page.evaluate(() => {
+        const d = await withTimeout(page.evaluate(() => {
           const c = document.querySelector('canvas'); if (!c) return null;
           try {
             const o = document.createElement('canvas'); o.width = c.width; o.height = c.height;
             o.getContext('2d').drawImage(c, 0, 0);
             return o.toDataURL('image/png');
           } catch (e) { return null; }
-        });
+        }), 25000, 'canvas readback');
         if (d) cands.push({ mode: 'canvas.readback', png: Buffer.from(d.split(',')[1], 'base64') });
       } catch (e) { note(`canvas readback failed: ${e.message.split('\n')[0]}`); }
       let best = null;
       for (const c of cands) {
-        try { c.stats = await frameStats(helper, c.png); } catch { continue; }
+        try { c.stats = await withTimeout(frameStats(helper, c.png), 25000, 'frameStats'); } catch { continue; }
         if (!best || c.stats.lit_fraction * c.stats.colours > best.stats.lit_fraction * best.stats.colours) best = c;
       }
       if (best) note(`grab: ${cands.map((c) => `${c.mode}=${c.stats ? c.stats.lit_fraction.toFixed(2) + '/' + c.stats.colours : 'err'}`).join(' ')} best=${best.mode}`);
@@ -291,9 +295,8 @@ async function main() {
   await browser.close().catch(() => {});
 }
 
-try { await main(); }
-catch (e) { result.reason = `script error: ${e && e.stack || e}`; note(result.reason); }
-
+function finish() {
+if (finished) return; finished = true;
 writeLedger();
 const d = dataSummary();
 const md = [
@@ -317,3 +320,13 @@ const md = [
 fs.writeFileSync(path.join(OUT, 'RESULT.md'), md);
 console.log(md);
 process.exit(0);
+}
+
+// Periodic ledger flush, and a hard stop so the script can never outlive 15 minutes.
+setInterval(() => { try { writeLedger(); } catch {} }, 30000).unref();
+const HARD_MS = Number(process.env.HARD_LIMIT_S || 900) * 1000;
+setTimeout(() => { result.reason = `hard time limit ${HARD_MS / 1000}s reached: ${result.reason}`; note(result.reason); finish(); }, HARD_MS - 5000);
+
+try { await main(); }
+catch (e) { result.reason = `script error: ${e && e.stack || e}`; note(result.reason); }
+finish();

@@ -21,6 +21,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      shoot:
+        description: 'Run the (software-GPU, experimental) screenshot step'
+        type: boolean
+        default: false
 concurrency:
   group: wenilla-${{ github.ref }}
   cancel-in-progress: true
@@ -144,6 +149,7 @@ jobs:
       # and wenilla-host only dials its --upstream (default 127.0.0.1) lazily when the page opens
       # /ws/{3724,8085}, which the survivors client never does. So no mangos server is started.
       - name: Start wenilla-host
+        if: github.event_name == 'workflow_dispatch' && inputs.shoot
         run: |
           mkdir -p ci-out
           nohup cargo run --release -p wenilla-host -- --www web/dist --data wow-data/Data > ci-out/host.log 2>&1 &
@@ -154,9 +160,11 @@ jobs:
           echo "host did not come up"; cat ci-out/host.log; exit 1
 
       - uses: actions/setup-node@v4
+        if: github.event_name == 'workflow_dispatch' && inputs.shoot
         with:
           node-version: '22'
       - name: Install Playwright (scratch dir outside the repo)
+        if: github.event_name == 'workflow_dispatch' && inputs.shoot
         run: |
           PW_DIR="$RUNNER_TEMP/pw"
           mkdir -p "$PW_DIR" && cd "$PW_DIR"
@@ -165,6 +173,7 @@ jobs:
           npx playwright install --with-deps chromium
           echo "PW_DIR=$PW_DIR" >> "$GITHUB_ENV"
       - name: Software Vulkan and X for WebGPU (xvfb, lavapipe)
+        if: github.event_name == 'workflow_dispatch' && inputs.shoot
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb mesa-vulkan-drivers libvulkan1 vulkan-tools
@@ -172,13 +181,14 @@ jobs:
           (vulkaninfo --summary 2>&1 | head -40) || true
 
       - name: Drive the client and take screenshots
+        if: github.event_name == 'workflow_dispatch' && inputs.shoot
         id: shoot
         continue-on-error: true
-        timeout-minutes: 40
+        timeout-minutes: 20
         run: xvfb-run -a node scripts/ci/shoot.mjs ci-out
 
       - name: Result summary
-        if: always()
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.shoot
         run: |
           if [ -f ci-out/RESULT.md ]; then
             cat ci-out/RESULT.md | tee -a "$GITHUB_STEP_SUMMARY"
@@ -187,18 +197,18 @@ jobs:
           fi
           # Game data is never uploaded: ci-out holds only logs, json and PNG screenshots.
           find ci-out -type f -printf '%s %p\n'
-          # Artifacts may be unreachable for reviewers: put the evidence in the job log (<=200 lines each).
+          # Artifacts may be unreachable for reviewers: put the evidence in the job log (short heads, console.log tail).
           for f in RESULT.md console.log gpu.txt data-requests.json; do
             echo "::group::ci-out/$f"
             if [ -f "ci-out/$f" ]; then
               n=$(wc -l < "ci-out/$f"); echo "($n lines)"
-              if [ "$f" = console.log ]; then echo "--- last 150 lines ---"; tail -n 150 "ci-out/$f"; else echo "(showing up to 200)"; head -n 200 "ci-out/$f"; fi
+              if [ "$f" = console.log ]; then echo "--- last 60 lines ---"; tail -n 60 "ci-out/$f"; else echo "(showing up to 40)"; head -n 40 "ci-out/$f"; fi
             else echo "(missing)"; fi
             echo "::endgroup::"
           done
 
       - name: Upload ci-out
-        if: always()
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.shoot
         uses: actions/upload-artifact@v4
         with:
           name: ci-out
