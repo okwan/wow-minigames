@@ -1,13 +1,13 @@
 // shoot.mjs - drive the served wenilla client in headless Chromium (CPU WebGPU via SwiftShader),
-// record every /data/ request, and take screenshots of the Warcraft Survivors autopilot run.
+// record every /data/ request, and take screenshots of the sandbox (the character standing in the world).
 //
 //   PW_DIR=<dir with `npm i playwright`> node scripts/ci/shoot.mjs [outDir]
 //
-// Env: BASE_URL (default http://127.0.0.1:8090), SURVIVORS_CLASS (Mage), SURVIVORS_MAP (Elwynn),
-//      READY_TIMEOUT_S (900), SHOT_TIMES_S ("60,120,240").
+// Env: BASE_URL (default http://127.0.0.1:8090), SANDBOX_RACE (human), SANDBOX_CLASS (mage),
+//      SANDBOX_QUERY (extra query string, e.g. "map=1&x=-950&y=-2700"), READY_TIMEOUT_S (900),
+//      SHOT_TIMES_S ("60,120,240").
 //
-// Query keys (benilla_app::webenv: WOW_<NAME> -> ?<name> lowercased): WOW_SURVIVORS_AUTO ->
-// ?survivors_auto=<class>, WOW_SURVIVORS_MAP -> ?survivors_map=<name|index>.
+// Query keys (benilla_app::sandbox): ?race= ?class= ?gender= ?map= ?x= ?y= ?z= ?facing= ?time=.
 //
 // This script never throws out of main(): a missing screenshot is a FAIL line in RESULT.md, not
 // a failed workflow (the caller also runs it continue-on-error).
@@ -17,11 +17,12 @@ import { createRequire } from 'node:module';
 
 const OUT = path.resolve(process.argv[2] || 'ci-out');
 const BASE = process.env.BASE_URL || 'http://127.0.0.1:8090';
-const CLASS = process.env.SURVIVORS_CLASS || 'Mage';
-const MAP = process.env.SURVIVORS_MAP || 'Elwynn';
+const RACE = process.env.SANDBOX_RACE || 'human';
+const CLASS = process.env.SANDBOX_CLASS || 'mage';
+const EXTRA = process.env.SANDBOX_QUERY ? `&${process.env.SANDBOX_QUERY}` : '';
 const READY_TIMEOUT_MS = Number(process.env.READY_TIMEOUT_S || 900) * 1000;
 const SHOT_TIMES_S = (process.env.SHOT_TIMES_S || '60,120,240').split(',').map(Number);
-const URL_ = `${BASE}/?survivors_auto=${encodeURIComponent(CLASS)}&survivors_map=${encodeURIComponent(MAP)}`;
+const URL_ = `${BASE}/?race=${encodeURIComponent(RACE)}&class=${encodeURIComponent(CLASS)}${EXTRA}`;
 const GB = 1000 ** 3, MB = 1000 ** 2;
 
 fs.mkdirSync(OUT, { recursive: true });
@@ -246,7 +247,7 @@ async function main() {
       return best;
     };
 
-    const isBegun = () => consoleLines.slice(mark).some((l) => l.includes('survivors auto: run begins'));
+    const isBegun = () => consoleLines.slice(mark).some((l) => l.includes('sandbox: character spawned'));
     const tStart = Date.now();
     let tBegan = null, anchor = null, bestBlank = null;
     try { await page.goto(url, { waitUntil: 'commit', timeout: 120000 }); } catch (e) { note(`goto: ${e.message.split('\n')[0]}`); }

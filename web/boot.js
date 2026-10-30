@@ -242,8 +242,8 @@ function createBootUi() {
     </style>
     <div class="embers"></div>
     <div class="box">
-      <div class="title">Azeroth Survivors</div>
-      <div class="by">a fan-made roguelike by Aethus</div>
+      <div class="title">WoW Sandbox</div>
+      <div class="by">a World of Warcraft engine base for mini-games &middot; no server, no login</div>
       <div class="stage">Loading…</div>
       <div class="bar"><i></i></div>
       <div class="data"></div>
@@ -259,12 +259,12 @@ function createBootUi() {
     embers.appendChild(e);
   }
   const tips = [
-    'Your spells cast themselves. Your only job is to not die.',
-    'Gems pull toward you once you are close. Greed gets heroes killed.',
-    'A boss arrives every couple of minutes. You will hear about it.',
-    'From level 5, F casts your class\u2019s escape. Blink, Charge, Sprint\u2026',
-    'Rare and Epic cards are worth more than they look. Legendary always is.',
-    'Press C to unlock the camera and swing it around with the mouse.',
+    'Hold the right mouse button to steer. Drag with the left to orbit the camera.',
+    'The wheel zooms. All the way in is an over-the-shoulder view.',
+    'Q and E strafe. A and D turn, until you hold the right mouse button.',
+    'Space jumps. Z sheathes your weapon and X sits down.',
+    'Add ?race=orc&class=warrior to the address to pick who you are.',
+    'Add ?map=1&x=-950&y=-2700 to the address to start somewhere else.',
   ];
   const tipEl = root.querySelector('.tip');
   let tipN = Math.floor(Math.random() * tips.length);

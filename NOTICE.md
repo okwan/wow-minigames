@@ -9,6 +9,18 @@ The engine code in this repository was imported on **2026-10-29** from:
 The whole source tree was copied except `.git` and `docs/screenshots/` (JPG screenshots of
 Blizzard art, removed deliberately). No Blizzard files are committed here.
 
+## What was removed
+
+The upstream repository is the engine plus the *Azeroth Survivors* game built on it
+(`crates/benilla-app/src/survivors/` and the `warcraft-survivors` launcher). **That game's code was
+removed from this repository** after the import: this project is the engine as a base for our own
+games, and ships none of Aethus's game. Two small pieces of it were kept and adapted because they
+are engine plumbing, not game: how a local unit is spawned so the stock attach and animation systems
+dress it (`crates/benilla-app/src/sandbox/units.rs`), and the class-trainer look and weapon tables
+that dress a character offline (`.../sandbox/looks.rs`). The game stays in the history (the import
+commit and the commits before the removal) and is credited below because the engine reached us
+through it. What replaced it is documented in [docs/SANDBOX.md](docs/SANDBOX.md).
+
 ## Credited authors and projects
 
 - [OutThisLife/azeroth-survivors-re](https://github.com/OutThisLife/azeroth-survivors-re): the
@@ -18,7 +30,7 @@ Blizzard art, removed deliberately). No Blizzard files are committed here.
 - [Arnesen/wenilla](https://github.com/Arnesen/wenilla): the WebAssembly build of benilla ("wenilla"),
   with a local host and realm service.
 - **Aethus** ([wow.aethus.pl](https://wow.aethus.pl/)): author of the *Azeroth Survivors* fan game,
-  whose design the upstream repository implements. It is not what this project ships.
+  whose design the upstream repository implements.
 
 ## Licenses
 

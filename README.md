@@ -1,14 +1,22 @@
 # wow-minigames
 
-A collection of small World of Warcraft-universe mini-games, built on an open-source, from-scratch
-WoW 1.12.1 client engine (Rust + [Bevy](https://bevy.org)) that also compiles to WebAssembly so the
-games run in the browser. **No server, no login, no account.**
+The base for our own World of Warcraft mini-games: an open-source, from-scratch WoW 1.12.1 client
+engine (Rust + [Bevy](https://bevy.org)) that also compiles to WebAssembly, so a game runs in the
+browser. **No server, no login, no account.** The engine is the product here; the games are ours to
+write on top of it.
+
+What you get today is the **sandbox**: the real world (Eastern Kingdoms and Kalimdor), one local
+character of any race, gender and class standing in it, and the engine's own third-person controls
+and camera: run, strafe, jump, swim, right-drag to steer, left-drag to orbit, wheel to zoom. No game
+rules, no quests, no enemies. A game is a Bevy plugin added in one place
+([`crates/sandbox/src/games`](crates/sandbox/src/games/mod.rs)); how is in
+[docs/SANDBOX.md](docs/SANDBOX.md).
 
 ## Plan
 
-- **Phase 1: proof of concept.** Import the engine and run it in the browser, locally, against a
-  WoW 1.12.1 client you supply. This repository is currently at this stage: the engine is imported
-  as-is (see [NOTICE.md](NOTICE.md)), and builds and runs the way it did upstream.
+- **Phase 1: the engine and the sandbox.** Import the engine, run it in the browser against a WoW
+  1.12.1 client you supply, drop everything that needed a server, and give games a place to start.
+  This repository is at this stage.
 - **Phase 2: our own games.** Mini-games made for this project, for example Darkmoon Faire
   mini-games, a Gnomeregan jumping game, and fishing.
 
@@ -23,10 +31,12 @@ games run in the browser. **No server, no login, no account.**
   - [samwhosung/benilla](https://github.com/samwhosung/benilla): the from-scratch WoW 1.12.1 client.
   - [Arnesen/wenilla](https://github.com/Arnesen/wenilla): benilla compiled to WebAssembly, with a
     local host and realm service.
-- **Survivors game design:** *Azeroth Survivors* is a free fan game by **Aethus**
-  ([wow.aethus.pl](https://wow.aethus.pl/)). Its game design is theirs and is **not** what this
-  project ships. The survivors code that came along with the engine import is not a product of
-  this project.
+- **Azeroth Survivors:** the imported repository also carried *Azeroth Survivors*, a free fan game by
+  **Aethus** ([wow.aethus.pl](https://wow.aethus.pl/)). Its game design is theirs. **We removed that
+  game from this repository**: its game logic, HUD and content are gone (two small engine-plumbing
+  pieces were kept and adapted, listed in [NOTICE.md](NOTICE.md)), and it is not what this project
+  ships. It
+  is credited because the engine came to us through it. See [NOTICE.md](NOTICE.md).
 - **Licenses:** engine code is licensed under [MIT](LICENSE-MIT) **or** [Apache 2.0](LICENSE-APACHE),
   at your option. Vendored components under `third_party/` keep their own upstream licenses (see the
   `LICENSE*` file in each directory).
@@ -53,7 +63,11 @@ make start     # then open http://127.0.0.1:8090/
 **Prerequisites:** [Rust](https://rustup.rs/), `make`, `curl`, `unzip`, and a bash shell. On Windows,
 run everything from Git Bash; PowerShell and cmd can't run the scripts.
 
-Run `make` (or `make help`) to list every target. Controls are in [CONTROLS.md](CONTROLS.md).
+Then `make start` serves it, and `http://127.0.0.1:8090/` opens straight into the sandbox: a loading
+screen, then your character in Northshire. `?race=orc&class=warrior&map=1&x=-950&y=-2700` picks who
+and where (every parameter is in [docs/SANDBOX.md](docs/SANDBOX.md)). `make native` runs the same
+thing as a desktop window. Run `make` (or `make help`) to list every target. Controls are in
+[CONTROLS.md](CONTROLS.md).
 
 ## The game data (not in this repo)
 

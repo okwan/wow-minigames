@@ -3,6 +3,11 @@
 > project's fork and release process (pin bot, PRs to Arnesen/wenilla, the wenilla-realm
 > deployment). This repository is **okwan/wow-minigames**: open pull requests against
 > `okwan/wow-minigames`, and ignore the Arnesen-specific steps below. See [NOTICE.md](NOTICE.md).
+>
+> **Also:** the Azeroth Survivors game this file's upstream shipped was removed here. The client
+> now boots into a server-less sandbox (a local character, the engine's own controller and
+> camera): see [docs/SANDBOX.md](docs/SANDBOX.md), and `crates/sandbox` is where our games live.
+> `crates/wenilla` and the native `sandbox` binary both start it (`benilla_app::run_sandbox_with`).
 
 # Working in this repository
 

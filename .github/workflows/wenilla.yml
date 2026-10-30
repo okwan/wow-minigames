@@ -145,9 +145,9 @@ jobs:
         run: cargo test --release -p wenilla-host
 
       # --- c. serve and measure --------------------------------------------------------------
-      # Survivors mode needs no realm: crates/wenilla's start() calls benilla_app::run_survivors,
+      # The sandbox needs no realm: crates/wenilla's start() calls benilla_app::run_sandbox_with,
       # and wenilla-host only dials its --upstream (default 127.0.0.1) lazily when the page opens
-      # /ws/{3724,8085}, which the survivors client never does. So no mangos server is started.
+      # /ws/{3724,8085}, which the sandbox client never does. So no mangos server is started.
       - name: Start wenilla-host
         if: github.event_name == 'workflow_dispatch' && inputs.shoot
         run: |
