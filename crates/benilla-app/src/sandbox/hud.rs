@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use crate::player::Player;
 
 const HELP: &str = "W/S move   A/D turn   Q/E strafe   Space jump   Right-drag steer   \
-                    Left-drag orbit   Wheel zoom   X sit   Z sheathe   F1 hide";
+                    Left-drag orbit   Wheel zoom   X sit   Z sheathe   M mute   F1 hide";
 
 #[derive(Component)]
 pub(super) struct HudRoot;

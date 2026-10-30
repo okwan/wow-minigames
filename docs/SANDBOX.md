@@ -34,6 +34,7 @@ character appears and the camera settles behind it.
 | mouse wheel | zoom, from first person out to 30 yards |
 | `Num Lock` | autorun |
 | `X` / `Z` | sit or stand / sheathe or draw the weapon |
+| `M` | mute or unmute all sound (the sandbox starts muted) |
 | `F1` | hide or show the help line and the coordinates readout |
 
 Where and who, as query parameters in the browser or `WOW_SANDBOX_<NAME>` variables natively
@@ -48,6 +49,7 @@ Where and who, as query parameters in the browser or `WOW_SANDBOX_<NAME>` variab
 | `gender` | `WOW_SANDBOX_GENDER` | `male` / `female` | `male` |
 | `class` | `WOW_SANDBOX_CLASS` | `warrior` `paladin` `hunter` `rogue` `priest` `shaman` `mage` `warlock` `druid`, or the id | `mage` |
 | `time` | `WOW_SANDBOX_TIME` | the light's time of day, `HH:MM` (there is no server clock to follow) | `13:00` |
+| `mute` | `WOW_SANDBOX_MUTE` | `1` silences all audio, `0` turns it on. Muted, no audio device is opened and no sound is decoded, so it also saves browser CPU; `M` in game unmutes, opening the device then (sounds asked for while muted are skipped, not queued) | `1` (muted) |
 | `example` | `WOW_SANDBOX_EXAMPLE` | `1` loads `crates/sandbox/src/games/example.rs` | off |
 
 Examples:

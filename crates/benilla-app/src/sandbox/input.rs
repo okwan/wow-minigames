@@ -18,6 +18,7 @@
 //! | autorun | `Num Lock` |
 //! | sit or stand / sheathe | `X` / `Z` |
 //! | zoom | wheel |
+//! | mute or unmute all sound | `M` |
 
 use benilla_ui::script::{BindingInput, FiredInput, HeldInput};
 use bevy::input::mouse::AccumulatedMouseScroll;
@@ -83,6 +84,25 @@ pub(crate) fn plan(
         out.push(BindingInput::Fire(FiredInput::CameraZoomOut(-wheel)));
     }
     out
+}
+
+/// `M` flips [`SoundConfig::muted`](crate::sound::SoundConfig), the runtime side of `?mute=`. The
+/// sound plugin opens the audio device the first time it is unmuted.
+pub(super) fn toggle_mute(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut config: ResMut<crate::sound::SoundConfig>,
+) {
+    let modifier = keys.any_pressed([
+        KeyCode::ControlLeft,
+        KeyCode::ControlRight,
+        KeyCode::AltLeft,
+        KeyCode::AltRight,
+        KeyCode::SuperLeft,
+        KeyCode::SuperRight,
+    ]);
+    if !modifier && keys.just_pressed(KeyCode::KeyM) {
+        config.muted = !config.muted;
+    }
 }
 
 /// Press this frame's inputs. Runs after the dispatch pass, which has just cleared the frame's

@@ -56,6 +56,9 @@ pub struct SandboxParams {
     pub class: u8,
     /// Minute of the day the light is pinned to (0..1440); there is no server clock to follow.
     pub minute: u32,
+    /// Silence all audio. On by default: a muted sandbox opens no audio device and decodes no
+    /// sound; `?mute=0` (or `M` in game) turns it on.
+    pub mute: bool,
 }
 
 impl Default for SandboxParams {
@@ -72,6 +75,7 @@ impl Default for SandboxParams {
             gender: 0,
             class: 8,
             minute: 13 * 60,
+            mute: true,
         }
     }
 }
@@ -148,6 +152,10 @@ pub(crate) fn parse(get: impl Fn(&str) -> Option<String>) -> (SandboxParams, Vec
         out.minute = parse_time(s)?;
         Some(())
     });
+    take("mute", &mut |s| {
+        out.mute = parse_bool(s)?;
+        Some(())
+    });
     out.snap_to_ground = xy_given && !z_given;
     (out, problems)
 }
@@ -205,6 +213,15 @@ pub(crate) fn parse_gender(s: &str) -> Option<u8> {
     match s.to_ascii_lowercase().as_str() {
         "male" | "m" | "0" => Some(0),
         "female" | "f" | "1" => Some(1),
+        _ => None,
+    }
+}
+
+/// `1`/`true`/`on`/`yes` or `0`/`false`/`off`/`no`.
+pub(crate) fn parse_bool(s: &str) -> Option<bool> {
+    match s.to_ascii_lowercase().as_str() {
+        "1" | "true" | "on" | "yes" => Some(true),
+        "0" | "false" | "off" | "no" => Some(false),
         _ => None,
     }
 }
@@ -316,6 +333,19 @@ mod tests {
         let right = parse_angle("90deg").unwrap();
         assert!((right - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
         assert_eq!(parse_angle("inf"), None);
+    }
+
+    #[test]
+    fn sound_is_muted_unless_asked_for() {
+        let (p, problems) = from(&[]);
+        assert!(p.mute && problems.is_empty());
+        let (p, problems) = from(&[("mute", "0")]);
+        assert!(!p.mute && problems.is_empty());
+        assert!(from(&[("mute", "1")]).0.mute);
+        assert!(!from(&[("mute", "off")]).0.mute);
+        // Unreadable: stays muted, and says so.
+        let (p, problems) = from(&[("mute", "maybe")]);
+        assert!(p.mute && problems.len() == 1);
     }
 
     #[test]
