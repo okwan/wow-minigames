@@ -1,0 +1,33 @@
+[package]
+name = "wow-sandbox"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The sandbox launcher, and the place our games live: the benilla client booted server-less into the real world with one local character, plus whatever `games::extend` adds. The native `sandbox` binary and the browser's `wenilla` both start it"
+
+[lints]
+workspace = true
+
+[features]
+# The dev/player seam, as the `benilla` launcher's: `--no-default-features` is the player build.
+default = ["dev"]
+dev = ["benilla-app/dev"]
+
+[dependencies]
+# `default-features = false`, or `--no-default-features` here still builds benilla-app with `dev`
+# (and `wenilla`, which depends on this crate for `games`, would pull the instruments into the page).
+benilla-app = { path = "../benilla-app", default-features = false }
+bevy.workspace = true
+
+[build-dependencies]
+benilla-buildstamp = { path = "../benilla-buildstamp" }
+
+[lib]
+name = "wow_sandbox"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sandbox"
+path = "src/main.rs"
+# No tests here, and test-building this bin would relink the whole app on every commit.
+test = false

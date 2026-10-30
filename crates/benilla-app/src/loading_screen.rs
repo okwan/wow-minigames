@@ -186,6 +186,21 @@ impl LoadingScreen {
         self.tip_edge.take()
     }
 
+    /// Sandbox mode (`crate::sandbox`): raise the cover at boot, before any avatar exists, and hold
+    /// it as a snap would (`awaiting_snap`) until [`Self::sandbox_avatar_placed`]. There
+    /// is no login to raise it, and the stream follows the camera until the avatar is seized, so
+    /// without this the first resident frame would clear it on an empty world.
+    pub(crate) fn raise_for_sandbox(&mut self, map: Option<u32>, now: f32) {
+        self.raise("sandbox entry", true, map, now);
+        self.tip_edge = Some(TipEdge::Pick);
+    }
+
+    /// The sandbox avatar has been seized by the controller (which holds it at `settling` until
+    /// its ground is resident): the cover's wait on a destination snap is over.
+    pub(crate) fn sandbox_avatar_placed(&mut self) {
+        self.awaiting_snap = false;
+    }
+
     /// The capture instrument (`WOW_CAPTURE=loading-tip`): raise as the glue→world entry does,
     /// with art, bar and a `Pick` tip, and never clear. `map` latches the art as a raise's does.
     pub(crate) fn hold_for_capture(&mut self, map: Option<u32>) {

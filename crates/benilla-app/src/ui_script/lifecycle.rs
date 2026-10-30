@@ -122,7 +122,11 @@ fn install_addon_asset_resolvers(world: &mut World, script: &mut UiScript) {
 
 /// Whether this run wants the player UI: always outside a capture, and in one only when opted in
 /// ([`crate::run_mode::capture_ui_opted_in`]), since capture baselines test the world render.
+/// Never in sandbox mode, which has no server to feed FrameXML ([`crate::sandbox`]).
 fn ui_wanted(world: &World) -> bool {
+    if world.contains_resource::<crate::sandbox::SandboxMode>() {
+        return false;
+    }
     !world.contains_resource::<crate::run_mode::CaptureMode>()
         || crate::run_mode::capture_ui_opted_in()
 }
