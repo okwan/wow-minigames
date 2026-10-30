@@ -87,14 +87,25 @@ jobs:
           cache-directories: tools
       - name: brotli (precompressed .br siblings)
         run: sudo apt-get update && sudo apt-get install -y brotli
+      # The built client is cached by its sources, so a re-run with unchanged client code skips
+      # the ~17 min build. Everything after (site assembly, tests, screenshot) still runs.
+      - name: Restore built client (web/dist)
+        id: dist-cache
+        uses: actions/cache@v4
+        with:
+          path: web/dist
+          key: wasm-dist-${{ hashFiles('crates/**', 'web/**', 'scripts/web-*.sh', 'Cargo.lock', 'rust-toolchain.toml') }}
       - name: Toolchain (scripts/web-setup.sh)
+        if: steps.dist-cache.outputs.cache-hit != 'true'
         run: scripts/web-setup.sh
       - name: Build wasm client (scripts/web-build.sh)
+        if: steps.dist-cache.outputs.cache-hit != 'true'
         run: scripts/web-build.sh
       - name: Build output sizes (Pages-fit evidence)
         run: |
           {
             echo '### web/dist sizes'
+            echo "built client cache hit: ${{ steps.dist-cache.outputs.cache-hit }}"
             echo 'Pages limits: 100 MB per file, ~1 GB per site, 10 GB/month soft bandwidth.'
             echo '```'
             ls -l web/dist
@@ -153,12 +164,17 @@ jobs:
           npm i playwright@1.49.1
           npx playwright install --with-deps chromium
           echo "PW_DIR=$PW_DIR" >> "$GITHUB_ENV"
+      - name: Software Vulkan and X for WebGPU (xvfb, lavapipe)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb mesa-vulkan-drivers libvulkan1 vulkan-tools
+          ls /usr/share/vulkan/icd.d || true
 
       - name: Drive the client and take screenshots
         id: shoot
         continue-on-error: true
         timeout-minutes: 45
-        run: node scripts/ci/shoot.mjs ci-out
+        run: xvfb-run -a node scripts/ci/shoot.mjs ci-out
 
       - name: Result summary
         if: always()
@@ -170,6 +186,14 @@ jobs:
           fi
           # Game data is never uploaded: ci-out holds only logs, json and PNG screenshots.
           find ci-out -type f -printf '%s %p\n'
+          # Artifacts may be unreachable for reviewers: put the evidence in the job log (<=200 lines each).
+          for f in RESULT.md console.log gpu.txt data-requests.json; do
+            echo "::group::ci-out/$f"
+            if [ -f "ci-out/$f" ]; then
+              n=$(wc -l < "ci-out/$f"); echo "($n lines, showing up to 200)"; head -n 200 "ci-out/$f"
+            else echo "(missing)"; fi
+            echo "::endgroup::"
+          done
 
       - name: Upload ci-out
         if: always()

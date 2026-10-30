@@ -33,13 +33,23 @@ const consoleLines = [];
 const logConsole = (s) => { consoleLines.push(`[${since()}s] ${s}`); };
 const note = (s) => { console.log(`[shoot ${since()}s] ${s}`); logConsole(`(shoot) ${s}`); };
 
-// Flag sets, tried in order; the first one where navigator.gpu yields an adapter wins.
+// Launch configs, tried in order; the first one where navigator.gpu yields an adapter AND a device
+// wins. `channel: 'chromium'` selects the new headless mode (the old headless shell has no
+// WebGPU). Headed sets need a display (the workflow runs this under xvfb-run).
 const COMMON = ['--ignore-gpu-blocklist', '--enable-webgpu-developer-features', '--no-sandbox'];
+const LVP_ICD = '/usr/share/vulkan/icd.d/lvp_icd.x86_64.json';
+const SWS_VK = ['--enable-unsafe-webgpu', '--enable-features=Vulkan,WebGPU', '--use-angle=vulkan', '--use-vulkan=swiftshader',
+  '--use-webgpu-adapter=swiftshader', '--enable-unsafe-swiftshader', '--disable-vulkan-surface', ...COMMON];
 const FLAG_SETS = [
-  { name: 'swiftshader-vulkan', args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-angle=swiftshader', '--use-gl=angle', ...COMMON] },
-  { name: 'swiftshader-vulkan-use-vulkan', args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-vulkan=swiftshader', '--use-angle=swiftshader', '--use-gl=angle', '--disable-vulkan-surface', ...COMMON] },
-  { name: 'angle-swiftshader-webgpu-only', args: ['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader', '--use-angle=swiftshader', ...COMMON] },
-  { name: 'minimal-unsafe-webgpu', args: ['--enable-unsafe-webgpu', ...COMMON] },
+  { name: 'a-new-headless-swiftshader-vulkan', opts: { channel: 'chromium', headless: true }, args: SWS_VK },
+  { name: 'b-headed-xvfb-swiftshader-vulkan', opts: { channel: 'chromium', headless: false }, args: SWS_VK, needsDisplay: true },
+  { name: 'c-new-headless-angle-swiftshader-gl', opts: { channel: 'chromium', headless: true },
+    args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan,WebGPU', '--use-angle=swiftshader', '--use-gl=angle', '--enable-unsafe-swiftshader', ...COMMON] },
+  { name: 'd-new-headless-lavapipe', opts: { channel: 'chromium', headless: true }, env: { VK_ICD_FILENAMES: LVP_ICD },
+    args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan,WebGPU', '--use-angle=vulkan', '--use-vulkan=native', '--disable-vulkan-surface', ...COMMON] },
+  { name: 'e-headed-xvfb-lavapipe', opts: { channel: 'chromium', headless: false }, env: { VK_ICD_FILENAMES: LVP_ICD }, needsDisplay: true,
+    args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan,WebGPU', '--use-angle=vulkan', '--use-vulkan=native', '--disable-vulkan-surface', ...COMMON] },
+  { name: 'f-old-headless-shell-minimal', opts: { headless: true }, args: ['--enable-unsafe-webgpu', ...COMMON] },
 ];
 
 // ---- /data/ request ledger ------------------------------------------------------------------
@@ -124,23 +134,40 @@ async function main() {
   const { chromium } = createRequire(path.join(path.resolve(pwDir), 'x.js'))('playwright');
 
   let browser, page, helper;
+  let gpuDumped = false;
   for (const fs_ of FLAG_SETS) {
-    note(`trying flag set "${fs_.name}": ${fs_.args.join(' ')}`);
+    if (fs_.needsDisplay && !process.env.DISPLAY) { note(`skip "${fs_.name}": no DISPLAY (run under xvfb-run)`); continue; }
+    note(`trying "${fs_.name}": ${JSON.stringify(fs_.opts)} ${fs_.env ? JSON.stringify(fs_.env) : ''} ${fs_.args.join(' ')}`);
     try {
-      browser = await chromium.launch({ headless: true, args: fs_.args });
+      browser = await chromium.launch({ ...fs_.opts, args: fs_.args, env: { ...process.env, ...(fs_.env || {}) } });
+      note(`  browser version: ${browser.version()}`);
       const probe = await browser.newPage();
-      await probe.goto('about:blank');
+      // Same origin as the game: 127.0.0.1 is a secure context, so navigator.gpu is exposed.
+      await probe.goto(`${BASE}/__gpu_probe__`).catch((e) => note(`  probe goto: ${e.message}`));
       const info = await probe.evaluate(async () => {
-        if (!navigator.gpu) return { ok: false, why: 'no navigator.gpu' };
+        const base = { hasGpu: !!navigator.gpu, isSecureContext: window.isSecureContext, ua: navigator.userAgent };
+        if (!navigator.gpu) return { ok: false, why: 'no navigator.gpu', ...base };
         const a = await navigator.gpu.requestAdapter();
-        if (!a) return { ok: false, why: 'requestAdapter() returned null' };
+        if (!a) return { ok: false, why: 'requestAdapter() returned null', ...base };
         let desc = {};
-        try { desc = a.info ? { vendor: a.info.vendor, architecture: a.info.architecture, description: a.info.description } : {}; } catch {}
-        try { await a.requestDevice(); } catch (e) { return { ok: false, why: 'requestDevice: ' + e }; }
-        return { ok: true, desc };
+        try { desc = a.info ? { vendor: a.info.vendor, architecture: a.info.architecture, device: a.info.device, description: a.info.description } : {}; } catch {}
+        const limits = { maxStorageBuffersPerShaderStage: a.limits?.maxStorageBuffersPerShaderStage, maxBufferSize: a.limits?.maxBufferSize };
+        try { await a.requestDevice(); } catch (e) { return { ok: false, why: 'requestDevice: ' + e, desc, ...base }; }
+        return { ok: true, desc, limits, ...base };
       });
-      await probe.close();
       note(`  probe: ${JSON.stringify(info)}`);
+      if (!gpuDumped || !info.ok) {
+        try {
+          const g = await browser.newPage();
+          await g.goto('chrome://gpu', { timeout: 30000 });
+          await sleep(3000);
+          const txt = await g.evaluate(() => document.body.innerText);
+          fs.appendFileSync(path.join(OUT, 'gpu.txt'), `\n===== chrome://gpu for "${fs_.name}" (ok=${info.ok}) =====\n${txt}\n`);
+          gpuDumped = true;
+          await g.close();
+        } catch (e) { note(`  chrome://gpu dump failed: ${e.message}`); }
+      }
+      await probe.close();
       if (info.ok) { result.flagSet = fs_.name; break; }
     } catch (e) { note(`  launch/probe failed: ${e.message}`); }
     try { await browser?.close(); } catch {}
@@ -162,6 +189,8 @@ async function main() {
   note(`open ${URL_}`);
   await page.goto(URL_, { waitUntil: 'commit', timeout: 120000 });
 
+  // New headless: a tab that is not frontmost can stall screenshots, so raise it first.
+  const shotPage = async (timeout = 60000) => { await page.bringToFront().catch(() => {}); return page.screenshot({ type: 'png', timeout }); };
   const isBegun = () => consoleLines.some((l) => l.includes('survivors auto: run begins'));
   const sawCapture = () => consoleLines.some((l) => l.includes('survivors auto: capture'));
   let anchor = null; // ms timestamp at which the character is judged visible
@@ -173,7 +202,7 @@ async function main() {
     if (Date.now() - lastPoll < 15000) continue; // pixel-check every 15 s only (screenshots are costly on CPU)
     lastPoll = Date.now();
     let stats;
-    try { stats = await frameStats(helper, await page.screenshot({ type: 'png', timeout: 60000 })); }
+    try { stats = await frameStats(helper, await shotPage()); }
     catch (e) { note(`screenshot probe failed: ${e.message}`); continue; }
     note(`probe: began=${result.runBegan} capture=${sawCapture()} lit=${stats.lit_fraction.toFixed(2)} colours=${stats.colours}`);
     if (result.runBegan && looksRendered(stats)) { anchor = Date.now(); result.rendered = true; break; }
@@ -181,7 +210,7 @@ async function main() {
   if (!anchor) {
     // Last resort: a non-black frame without the log hint still gets screenshotted.
     try {
-      const png = await page.screenshot({ type: 'png', timeout: 60000 });
+      const png = await shotPage();
       const stats = await frameStats(helper, png);
       fs.writeFileSync(path.join(OUT, 'shot-timeout.png'), png);
       result.reason = `timeout after ${READY_TIMEOUT_MS / 1000}s waiting for the run to begin and the canvas to render (runBegan=${result.runBegan}, last frame lit=${stats.lit_fraction.toFixed(2)} colours=${stats.colours}); see shot-timeout.png and console.log`;
@@ -196,7 +225,7 @@ async function main() {
     if (wait > 0) await sleep(wait);
     n++;
     try {
-      const png = await page.screenshot({ type: 'png', timeout: 120000 });
+      const png = await shotPage(120000);
       const stats = await frameStats(helper, png);
       const file = `shot-${n}.png`;
       fs.writeFileSync(path.join(OUT, file), png);
@@ -220,7 +249,7 @@ const md = [
   '',
   `- reason: ${result.reason}`,
   `- url: \`${URL_}\``,
-  `- Chromium flag set that exposed WebGPU: ${result.flagSet ?? 'none'}`,
+  `- Chromium launch config that exposed WebGPU: ${result.flagSet ?? 'none'}`,
   `- run began (console hint): ${result.runBegan}; canvas rendered (pixel check): ${result.rendered}`,
   `- screenshots: ${result.shots.map((s) => `${s.file} (+${s.at_s}s, lit ${s.lit_fraction.toFixed(2)}, ${s.colours} colours)`).join('; ') || 'none'}`,
   '',
