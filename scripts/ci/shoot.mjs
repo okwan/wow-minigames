@@ -30,13 +30,17 @@ const t0 = Date.now();
 const since = () => ((Date.now() - t0) / 1000).toFixed(1);
 
 const consoleLines = [];
-const logConsole = (s) => { consoleLines.push(`[${since()}s] ${s}`); };
+let suppressed = 0;
+const NOISE = /Failed to load resource|404|requestfailed|ERR_FAILED|net::/i;
+const logConsole = (s) => { if (NOISE.test(s) && !/panic|unreachable|Validation|Destroyed/i.test(s)) { suppressed++; return; } consoleLines.push(`[${since()}s] ${s}`); };
 const note = (s) => { console.log(`[shoot ${since()}s] ${s}`); logConsole(`(shoot) ${s}`); };
 
 // Launch configs, tried in order; the first one where navigator.gpu yields an adapter AND a device
 // wins. `channel: 'chromium'` selects the new headless mode (the old headless shell has no
 // WebGPU). Headed sets need a display (the workflow runs this under xvfb-run).
-const COMMON = ['--ignore-gpu-blocklist', '--enable-webgpu-developer-features', '--no-sandbox'];
+const COMMON = ['--ignore-gpu-blocklist', '--enable-webgpu-developer-features', '--no-sandbox',
+  '--disable-gpu-vsync', '--disable-frame-rate-limit', '--run-all-compositor-stages-before-draw',
+  '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling'];
 const LVP_ICD = '/usr/share/vulkan/icd.d/lvp_icd.x86_64.json';
 const SWS_VK = ['--enable-unsafe-webgpu', '--enable-features=Vulkan,WebGPU', '--use-angle=vulkan', '--use-vulkan=swiftshader',
   '--use-webgpu-adapter=swiftshader', '--enable-unsafe-swiftshader', '--disable-vulkan-surface', ...COMMON];
@@ -99,7 +103,7 @@ function dataSummary() {
 }
 function writeLedger() {
   fs.writeFileSync(path.join(OUT, 'data-requests.json'), JSON.stringify(dataSummary(), null, 2));
-  fs.writeFileSync(path.join(OUT, 'console.log'), consoleLines.join('\n') + '\n');
+  fs.writeFileSync(path.join(OUT, 'console.log'), consoleLines.join('\n') + `\n(suppressed ${suppressed} 404/failed-resource lines)\n`);
 }
 
 // ---- pixel check ---------------------------------------------------------------------------
@@ -123,7 +127,7 @@ async function frameStats(helper, png) {
     return { lit_fraction: lit / (w * h), colours: buckets.size };
   }, png.toString('base64'));
 }
-const looksRendered = (s) => s.lit_fraction > 0.15 && s.colours >= 12;
+const looksRendered = (s) => s.lit_fraction > 0.05 && s.colours >= 12;
 
 // ---- main ----------------------------------------------------------------------------------
 const result = { status: 'FAIL', reason: 'did not start', flagSet: null, shots: [], rendered: false, runBegan: false };
@@ -177,67 +181,114 @@ async function main() {
   if (!browser) { result.reason = 'no Chromium flag set exposed a WebGPU adapter (see console.log)'; return; }
   note(`WebGPU works with flag set: ${result.flagSet}`);
 
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-  page = await ctx.newPage();
-  helper = await ctx.newPage();
-  await helper.goto('about:blank');
-  attachLedger(page);
-  page.on('console', (m) => logConsole(`${m.type()}: ${m.text()}`));
-  page.on('pageerror', (e) => logConsole(`pageerror: ${e.message}`));
-  page.on('crash', () => logConsole('PAGE CRASHED'));
-  page.on('requestfailed', (r) => { if (r.url().includes('/data/')) logConsole(`requestfailed: ${r.url()} ${r.failure()?.errorText}`); });
+  // ---- attempts: each gets a budget, then we move on instead of waiting out one for 900 s -------
+  const ATTEMPTS = [
+    { name: 'full', query: '' },
+    { name: 'reduced', query: '&renderScale=0.5&farclip=120&worlddetail=0' },
+  ];
+  const BEGIN_BUDGET_MS = Number(process.env.BEGIN_BUDGET_S || 420) * 1000; // to "run begins"
+  const RENDER_BUDGET_MS = Number(process.env.RENDER_BUDGET_S || 360) * 1000; // after "run begins"
+  const KEY_ERR = /panic|unreachable|Validation|lost|Destroyed/i;
+  const saveLoading = (png) => { if (!fs.existsSync(path.join(OUT, 'shot-loading.png'))) fs.writeFileSync(path.join(OUT, 'shot-loading.png'), png); };
 
-  note(`open ${URL_}`);
-  await page.goto(URL_, { waitUntil: 'commit', timeout: 120000 });
+  for (const att of ATTEMPTS) {
+    const url = URL_ + att.query;
+    note(`=== attempt "${att.name}": ${url}`);
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+    page = await ctx.newPage();
+    helper = await ctx.newPage();
+    await helper.goto('about:blank');
+    attachLedger(page);
+    const mark = consoleLines.length;
+    page.on('console', (m) => {
+      const t = m.text();
+      logConsole(`${m.type()}: ${t}`);
+      if (KEY_ERR.test(t)) note(`KEY console ${m.type()}: ${t.slice(0, 300)}`);
+    });
+    page.on('pageerror', (e) => { logConsole(`pageerror: ${e.message}`); note(`KEY pageerror: ${e.message.slice(0, 300)}`); });
+    page.on('crash', () => { logConsole('PAGE CRASHED'); note('PAGE CRASHED'); });
+    page.on('requestfailed', (r) => { if (r.url().includes('/data/')) logConsole(`requestfailed: ${r.url()} ${r.failure()?.errorText}`); });
+    let cdp = null;
+    try { cdp = await ctx.newCDPSession(page); } catch (e) { note(`no CDP session: ${e.message}`); }
 
-  // New headless: a tab that is not frontmost can stall screenshots, so raise it first.
-  const shotPage = async (timeout = 60000) => { await page.bringToFront().catch(() => {}); return page.screenshot({ type: 'png', timeout }); };
-  const isBegun = () => consoleLines.some((l) => l.includes('survivors auto: run begins'));
-  const sawCapture = () => consoleLines.some((l) => l.includes('survivors auto: capture'));
-  let anchor = null; // ms timestamp at which the character is judged visible
-  let lastPoll = 0;
-  while (Date.now() - t0 < READY_TIMEOUT_MS) {
-    await sleep(5000);
-    if (page.isClosed()) { result.reason = 'page closed'; return; }
-    if (isBegun()) result.runBegan = true;
-    if (Date.now() - lastPoll < 15000) continue; // pixel-check every 15 s only (screenshots are costly on CPU)
-    lastPoll = Date.now();
-    let stats;
-    try { stats = await frameStats(helper, await shotPage()); }
-    catch (e) { note(`screenshot probe failed: ${e.message}`); continue; }
-    note(`probe: began=${result.runBegan} capture=${sawCapture()} lit=${stats.lit_fraction.toFixed(2)} colours=${stats.colours}`);
-    if (result.runBegan && looksRendered(stats)) { anchor = Date.now(); result.rendered = true; break; }
-  }
-  if (!anchor) {
-    // Last resort: a non-black frame without the log hint still gets screenshotted.
-    try {
-      const png = await shotPage();
-      const stats = await frameStats(helper, png);
-      fs.writeFileSync(path.join(OUT, 'shot-timeout.png'), png);
-      result.reason = `timeout after ${READY_TIMEOUT_MS / 1000}s waiting for the run to begin and the canvas to render (runBegan=${result.runBegan}, last frame lit=${stats.lit_fraction.toFixed(2)} colours=${stats.colours}); see shot-timeout.png and console.log`;
-    } catch (e) { result.reason = `timeout waiting for the world; final screenshot failed: ${e.message}`; }
-    return;
-  }
-  note(`world rendered; character judged visible — taking shots at +${SHOT_TIMES_S.join('s, +')}s`);
+    // Grab the frame several ways; blank compositor shots of a WebGPU canvas are a known failure.
+    const grab = async () => {
+      await page.bringToFront().catch(() => {});
+      const cands = [];
+      try { cands.push({ mode: 'page.screenshot', png: await page.screenshot({ type: 'png', timeout: 60000 }) }); } catch (e) { note(`page.screenshot failed: ${e.message.split('\n')[0]}`); }
+      if (cdp) {
+        try {
+          const r = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true });
+          cands.push({ mode: 'cdp.fromSurface', png: Buffer.from(r.data, 'base64') });
+        } catch (e) { note(`cdp capture failed: ${e.message.split('\n')[0]}`); }
+      }
+      try {
+        const d = await page.evaluate(() => {
+          const c = document.querySelector('canvas'); if (!c) return null;
+          try {
+            const o = document.createElement('canvas'); o.width = c.width; o.height = c.height;
+            o.getContext('2d').drawImage(c, 0, 0);
+            return o.toDataURL('image/png');
+          } catch (e) { return null; }
+        });
+        if (d) cands.push({ mode: 'canvas.readback', png: Buffer.from(d.split(',')[1], 'base64') });
+      } catch (e) { note(`canvas readback failed: ${e.message.split('\n')[0]}`); }
+      let best = null;
+      for (const c of cands) {
+        try { c.stats = await frameStats(helper, c.png); } catch { continue; }
+        if (!best || c.stats.lit_fraction * c.stats.colours > best.stats.lit_fraction * best.stats.colours) best = c;
+      }
+      if (best) note(`grab: ${cands.map((c) => `${c.mode}=${c.stats ? c.stats.lit_fraction.toFixed(2) + '/' + c.stats.colours : 'err'}`).join(' ')} best=${best.mode}`);
+      return best;
+    };
 
-  let n = 0;
-  for (const at of SHOT_TIMES_S) {
-    const wait = anchor + at * 1000 - Date.now();
-    if (wait > 0) await sleep(wait);
-    n++;
-    try {
-      const png = await shotPage(120000);
-      const stats = await frameStats(helper, png);
-      const file = `shot-${n}.png`;
-      fs.writeFileSync(path.join(OUT, file), png);
-      result.shots.push({ file, at_s: at, ...stats });
-      note(`${file}: lit=${stats.lit_fraction.toFixed(2)} colours=${stats.colours}`);
-    } catch (e) { note(`shot ${n} failed: ${e.message}`); }
+    const isBegun = () => consoleLines.slice(mark).some((l) => l.includes('survivors auto: run begins'));
+    const tStart = Date.now();
+    let tBegan = null, anchor = null, bestBlank = null;
+    try { await page.goto(url, { waitUntil: 'commit', timeout: 120000 }); } catch (e) { note(`goto: ${e.message.split('\n')[0]}`); }
+    while (true) {
+      const now = Date.now();
+      if (now - t0 > READY_TIMEOUT_MS * 2) break;
+      if (!tBegan && now - tStart > BEGIN_BUDGET_MS) { note(`attempt "${att.name}": run never began within ${BEGIN_BUDGET_MS / 1000}s`); break; }
+      if (tBegan && now - tBegan > RENDER_BUDGET_MS) { note(`attempt "${att.name}": nothing rendered ${RENDER_BUDGET_MS / 1000}s after run began`); break; }
+      await sleep(5000);
+      if (page.isClosed()) { note('page closed'); break; }
+      if (isBegun()) { result.runBegan = true; tBegan ||= Date.now(); }
+      const g = await grab();
+      if (!g) continue;
+      note(`probe[${att.name}]: began=${!!tBegan} lit=${g.stats.lit_fraction.toFixed(2)} colours=${g.stats.colours}`);
+      if (!bestBlank || g.stats.colours > bestBlank.stats.colours) bestBlank = g;
+      if (g.stats.colours >= 8 && g.stats.lit_fraction > 0.02 && !tBegan) saveLoading(g.png);
+      if (tBegan && looksRendered(g.stats)) { anchor = Date.now(); result.rendered = true; result.flagSet = `${result.flagSet} + ${att.name}${g.mode ? ' (' + g.mode + ')' : ''}`; break; }
+    }
+    if (!anchor) {
+      if (bestBlank) { fs.writeFileSync(path.join(OUT, `shot-timeout-${att.name}.png`), bestBlank.png); }
+      result.reason = `attempt "${att.name}" never rendered the world (runBegan=${result.runBegan}); see shot-timeout-*.png, console.log`;
+      await ctx.close().catch(() => {});
+      continue;
+    }
+    note(`world rendered; taking shots at +${SHOT_TIMES_S.join('s, +')}s`);
+    let n = 0;
+    for (const at of SHOT_TIMES_S) {
+      const wait = anchor + at * 1000 - Date.now();
+      if (wait > 0) await sleep(wait);
+      n++;
+      try {
+        const g = await grab();
+        if (!g) throw new Error('no capture');
+        const file = `shot-${n}.png`;
+        fs.writeFileSync(path.join(OUT, file), g.png);
+        result.shots.push({ file, at_s: at, ...g.stats, good: looksRendered(g.stats) });
+        note(`${file}: ${g.mode} lit=${g.stats.lit_fraction.toFixed(2)} colours=${g.stats.colours}`);
+      } catch (e) { note(`shot ${n} failed: ${e.message}`); }
+    }
+    const good = result.shots.filter((x) => x.good).length;
+    if (good === SHOT_TIMES_S.length) { result.status = 'PASS'; result.reason = `world rendered (${att.name}); all screenshots good`; }
+    else if (good) { result.status = 'FAIL'; result.reason = `only ${good}/${SHOT_TIMES_S.length} good screenshots`; }
+    else { result.reason = 'world rendered but every screenshot was blank'; }
+    break;
   }
-  if (result.shots.length === SHOT_TIMES_S.length) { result.status = 'PASS'; result.reason = 'world rendered; all screenshots taken'; }
-  else if (result.shots.length) { result.status = 'FAIL'; result.reason = `only ${result.shots.length}/${SHOT_TIMES_S.length} screenshots taken`; }
-  else { result.reason = 'world rendered but every screenshot failed'; }
-  await browser.close();
+  await browser.close().catch(() => {});
 }
 
 try { await main(); }

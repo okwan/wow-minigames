@@ -174,7 +174,7 @@ jobs:
       - name: Drive the client and take screenshots
         id: shoot
         continue-on-error: true
-        timeout-minutes: 45
+        timeout-minutes: 40
         run: xvfb-run -a node scripts/ci/shoot.mjs ci-out
 
       - name: Result summary
@@ -191,7 +191,8 @@ jobs:
           for f in RESULT.md console.log gpu.txt data-requests.json; do
             echo "::group::ci-out/$f"
             if [ -f "ci-out/$f" ]; then
-              n=$(wc -l < "ci-out/$f"); echo "($n lines, showing up to 200)"; head -n 200 "ci-out/$f"
+              n=$(wc -l < "ci-out/$f"); echo "($n lines)"
+              if [ "$f" = console.log ]; then echo "--- last 150 lines ---"; tail -n 150 "ci-out/$f"; else echo "(showing up to 200)"; head -n 200 "ci-out/$f"; fi
             else echo "(missing)"; fi
             echo "::endgroup::"
           done
