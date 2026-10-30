@@ -78,6 +78,20 @@ Or set it permanently by editing the single clearly-marked `DEFAULT_DATA_URL` li
 `scripts/fetch-data.sh`. Either way the URL must be a direct link to a zip holding the client's
 `Data/*.MPQ` files.
 
+## CI
+
+`.github/workflows/wenilla.yml` downloads the client data (cached in the Actions cache, never
+committed), builds the wasm client, runs the host tests, and drives the client in headless Chromium
+for screenshots (uploaded as the `ci-out` artifact). Repository variables (Settings > Secrets and
+variables > Actions > Variables):
+
+- `WOW_DATA_URLS`: optional whitespace/newline separated list of mirror URLs for the 1.12.1 client
+  zip, tried in order (default: the archive.org item). Same variable works locally with
+  `scripts/fetch-data.sh`.
+- `PAGES_ENABLED`: any non-empty value turns on the GitHub Pages deploy job (client shell only; no
+  game data is ever published, so the world does not load there). The site is marked `noindex`.
+  Leave it unset to skip the deploy; the `site` artifact is still built for inspection.
+
 ## Legal
 
 This project is not affiliated with or endorsed by Blizzard Entertainment, and it ships no Blizzard
