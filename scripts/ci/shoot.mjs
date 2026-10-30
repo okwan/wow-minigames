@@ -143,6 +143,7 @@ async function main() {
       note(`  browser version: ${browser.version()}`);
       const probe = await browser.newPage();
       // Same origin as the game: 127.0.0.1 is a secure context, so navigator.gpu is exposed.
+      await probe.route('**/__gpu_probe__', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>probe</title>' }));
       await probe.goto(`${BASE}/__gpu_probe__`).catch((e) => note(`  probe goto: ${e.message}`));
       const info = await probe.evaluate(async () => {
         const base = { hasGpu: !!navigator.gpu, isSecureContext: window.isSecureContext, ua: navigator.userAgent };
@@ -153,7 +154,7 @@ async function main() {
         try { desc = a.info ? { vendor: a.info.vendor, architecture: a.info.architecture, device: a.info.device, description: a.info.description } : {}; } catch {}
         const limits = { maxStorageBuffersPerShaderStage: a.limits?.maxStorageBuffersPerShaderStage, maxBufferSize: a.limits?.maxBufferSize };
         try { await a.requestDevice(); } catch (e) { return { ok: false, why: 'requestDevice: ' + e, desc, ...base }; }
-        return { ok: true, desc, limits, ...base };
+        return { ok: true, desc, limits, features: [...a.features], ...base };
       });
       note(`  probe: ${JSON.stringify(info)}`);
       if (!gpuDumped || !info.ok) {
