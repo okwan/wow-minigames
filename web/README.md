@@ -1,5 +1,10 @@
 # wenilla — benilla in a browser
 
+> **In this repository** the page boots the server-less sandbox (`benilla_app::run_sandbox_with`, see
+> [docs/SANDBOX.md](../docs/SANDBOX.md)): no login, no realm, no `/ws/*` traffic. Everything below
+> about logging in and the realm describes the upstream wenilla and still applies to the engine's
+> networked path.
+
 The same client, compiled to WebAssembly: log in, pick a character, and play a 1.12.1
 server from a browser tab — no install. Everything a browser cannot do natively is replaced
 behind a seam the native build already had:

@@ -7432,14 +7432,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "warcraft-survivors"
-version = "0.2.0"
-dependencies = [
- "benilla-app",
- "benilla-buildstamp",
-]
-
-[[package]]
 name = "wasi"
 version = "0.11.1+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7737,6 +7729,7 @@ dependencies = [
  "benilla-buildstamp",
  "console_error_panic_hook",
  "wasm-bindgen",
+ "wow-sandbox",
 ]
 
 [[package]]
@@ -8581,6 +8574,15 @@ dependencies = [
  "serde_json",
  "unicode-xid",
  "wasmparser",
+]
+
+[[package]]
+name = "wow-sandbox"
+version = "0.2.0"
+dependencies = [
+ "benilla-app",
+ "benilla-buildstamp",
+ "bevy",
 ]
 
 [[package]]

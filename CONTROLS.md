@@ -1,25 +1,28 @@
 # Controls
 
-**Azeroth Survivors** — top-down, one hand on WASD, the other on the wheel.
+The **sandbox** uses the 1.12 client's own third-person controls. There is no menu: the game boots
+straight into the world with your character.
 
-| When | Key / Input | Action |
-|---|---|---|
-| Menu | Click a race, gender, class and zone | make your pick (**Randomize** rolls one) |
-| Menu | **Enter** (or **Enter World**) | start the run; the world travels to the zone picked |
-| Playing | **W / S / A / D** or **arrow keys** | move the hero (locked camera: the hero faces the cursor, backpedals and strafes) |
-| Playing | **Space** | jump |
-| Playing | **F** (from level 5) | your class's movement spell: Blink, Charge… aim at the cursor |
-| Playing | **C** | unlock / lock the camera |
-| Any | **G** | toggle the picture polish (`?grade=0` starts it off) |
-| Playing | **mouse wheel** | zoom, from over the shoulder out to 70 yd |
-| Playing | **drag** (camera unlocked) | swing and tilt the camera |
-| Playing | **Esc** | pause |
-| Playing | — | abilities cast themselves (no aim) |
-| Level up | **1 / 2 / 3** (or click a card) | pick an upgrade |
-| Paused | **Esc** | resume |
-| Game over | **Enter** (or **Play again**) | back to the menu |
-| Any | minimap **+ / −** / minimize | minimap zoom / collapse |
+| Input | Action |
+|---|---|
+| **W** / **S** (or **Up** / **Down**) | run forward / backpedal |
+| **A** / **D** (or **Left** / **Right**) | turn; **strafe** instead while the right mouse button is held |
+| **Q** / **E** | strafe left / right |
+| **Space** | jump |
+| **Right mouse**, drag | steer: the character turns with the camera (the cursor hides and locks) |
+| **Left mouse**, drag | orbit the camera around the character; it swings back behind you as you move |
+| **Both mouse buttons** | run forward, steering with the mouse |
+| **Mouse wheel** | zoom, from first person out to 30 yards |
+| **Num Lock** | autorun |
+| **X** / **Z** | sit or stand / sheathe or draw the weapon |
+| **F1** | hide or show the help line and the coordinates readout |
 
-The camera follows the hero, locked top-down by default (laptop-friendly). **C** unlocks it so a
-mouse drag swings and tilts it; **C** again snaps it back. In the menu it slowly orbits the
-preview hero. Your race, gender, class and zone are remembered across reloads.
+Swimming, falling and stepping up a ledge work as in the client. Walking into a building collides
+with it.
+
+Choose who and where with the page address, for example
+`http://127.0.0.1:8090/?race=orc&class=warrior&map=1&x=-950&y=-2700`. The parameters are in
+[docs/SANDBOX.md](docs/SANDBOX.md).
+
+On Linux, Chrome needs `--enable-unsafe-webgpu` (or `chrome://flags/#enable-unsafe-webgpu`) for the
+world to render.

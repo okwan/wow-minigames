@@ -102,3 +102,17 @@ impl BindingsState {
         }
     }
 }
+
+impl BindingsState {
+    /// Feed binding calls that did not come from a Lua body: sandbox mode (`crate::sandbox`) has no
+    /// UI VM, so no `Bindings.xml` body runs, and its input system presses the same inputs the
+    /// stock bodies would (`MoveForwardStart()` and the rest), through the same entry as Lua's.
+    pub(crate) fn feed_inputs(&mut self, inputs: Vec<BindingInput>) {
+        self.apply_script_input(inputs);
+    }
+
+    /// Is this held bit set right now? [`Self::pressed`] under the name a script call uses.
+    pub(crate) fn holds(&self, held: HeldInput) -> bool {
+        self.pressed(held_input(held))
+    }
+}
