@@ -90,6 +90,12 @@ pub use units::{
 /// flag lives here; `WOW_SANDBOX` (`?sandbox=1` on the web) still turns it on from outside.
 pub(crate) static ACTIVE: AtomicBool = AtomicBool::new(false);
 
+/// Whether this sandbox run starts with sound muted ([`SandboxParams::mute`], default on).
+/// `false` outside the sandbox.
+pub(crate) fn start_muted() -> bool {
+    active() && SandboxParams::from_env().mute
+}
+
 pub(crate) fn active() -> bool {
     ACTIVE.load(Ordering::Relaxed) || crate::webenv::var("WOW_SANDBOX").is_some()
 }
@@ -133,6 +139,7 @@ impl Plugin for SandboxPlugin {
                 (
                     // Keys into the controller's inputs: after the dispatch pass cleared the
                     // frame's edges, before the controller reads them.
+                    input::toggle_mute,
                     input::feed_bindings
                         .after(crate::bindings::BindingSet)
                         .before(WorldStage::Input)

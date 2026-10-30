@@ -357,6 +357,13 @@ impl Plugin for SoundPlugin {
         let silent = ["WOW_NOSOUND", "WOW_CAPTURE"]
             .into_iter()
             .find(|v| std::env::var_os(v).is_some());
+        // A sandbox that starts muted opens no device and decodes nothing; the first unmute
+        // ([`open_deferred_mixer`]) opens it, from a key press, which a browser's AudioContext
+        // needs anyway.
+        let deferred = silent.is_none() && crate::sandbox::start_muted();
+        if deferred {
+            app.insert_resource(DeferredMixer);
+        }
         // Before the mixer: the probe's taps are main-track effects, fixed when kira builds it.
         let probe_dir = if silent.is_some() {
             None
@@ -365,6 +372,9 @@ impl Plugin for SoundPlugin {
         };
         let mixer = if let Some(var) = silent {
             info!("${var} set — audio disabled");
+            None
+        } else if deferred {
+            info!("sandbox sound muted — audio opens on unmute (`M`, or `?mute=0`)");
             None
         } else {
             match Mixer::new(probe_dir.as_deref()) {
@@ -393,7 +403,10 @@ impl Plugin for SoundPlugin {
             voices_denied: 0,
             copies_dropped: 0,
         })
-        .init_resource::<SoundConfig>()
+        .insert_resource(SoundConfig {
+            muted: deferred,
+            ..default()
+        })
         .init_resource::<AudioListener>()
         .add_systems(
             Startup,
@@ -410,7 +423,8 @@ impl Plugin for SoundPlugin {
                 // After Input writes the pose and camera, before Present's consumers read it.
                 update_audio_listener.in_set(WorldStage::Stream),
                 toggle_mute,
-                apply_master_volume.after(toggle_mute),
+                open_deferred_mixer.after(toggle_mute),
+                apply_master_volume.after(open_deferred_mixer),
                 apply_focus_gate,
                 poll_mix_health,
             ),
@@ -490,6 +504,29 @@ fn toggle_mute(keys: Res<ButtonInput<KeyCode>>, mut config: ResMut<SoundConfig>)
     if crate::run_mode::dev_chord(&keys, KeyCode::KeyM) {
         config.muted = !config.muted;
         info!("sound {}", if config.muted { "muted" } else { "unmuted" });
+    }
+}
+
+/// Present while a muted sandbox has not opened its audio device yet.
+#[derive(Resource)]
+struct DeferredMixer;
+
+/// The first unmute of a sandbox that started muted opens the device ([`Mixer::new`]). Sounds the
+/// world asked for while it was closed were skipped, not queued: the soundscape resumes with the
+/// next zone, creature or footstep.
+fn open_deferred_mixer(
+    mut commands: Commands,
+    deferred: Option<Res<DeferredMixer>>,
+    config: Res<SoundConfig>,
+    mut out: NonSendMut<SoundOutput>,
+) {
+    if deferred.is_none() || config.muted {
+        return;
+    }
+    commands.remove_resource::<DeferredMixer>();
+    match Mixer::new(None) {
+        Ok(m) => out.mixer = Some(m),
+        Err(e) => warn!("no audio device — running silent: {e:#}"),
     }
 }
 

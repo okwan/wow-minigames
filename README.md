@@ -65,8 +65,8 @@ run everything from Git Bash; PowerShell and cmd can't run the scripts.
 
 Then `make start` serves it, and `http://127.0.0.1:8090/` opens straight into the sandbox: a loading
 screen, then your character in Northshire. `?race=orc&class=warrior&map=1&x=-950&y=-2700` picks who
-and where (every parameter is in [docs/SANDBOX.md](docs/SANDBOX.md)). `make native` runs the same
-thing as a desktop window. Run `make` (or `make help`) to list every target. Controls are in
+and where (every parameter is in [docs/SANDBOX.md](docs/SANDBOX.md)). Sound is muted by default:
+`?mute=0` turns it on, or press `M` in game. `make native` runs the same thing as a desktop window. Run `make` (or `make help`) to list every target. Controls are in
 [CONTROLS.md](CONTROLS.md).
 
 ## The game data (not in this repo)

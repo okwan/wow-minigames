@@ -15,6 +15,7 @@ straight into the world with your character.
 | **Mouse wheel** | zoom, from first person out to 30 yards |
 | **Num Lock** | autorun |
 | **X** / **Z** | sit or stand / sheathe or draw the weapon |
+| **M** | mute or unmute all sound (the sandbox starts muted) |
 | **F1** | hide or show the help line and the coordinates readout |
 
 Swimming, falling and stepping up a ledge work as in the client. Walking into a building collides
